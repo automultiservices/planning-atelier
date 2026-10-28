@@ -128,6 +128,7 @@ main{max-width:1400px;margin:0 auto;padding-block:16px 40px;padding-left:max(16p
 .card.task.done{background:color-mix(in srgb,var(--ok) 13%,var(--surface));box-shadow:inset 4px 0 0 var(--ok)}
 .card .foot{margin-top:auto;padding-top:6px;display:flex;justify-content:flex-end}
 .card .r3.foot{justify-content:space-between}
+.nb2{background:var(--sunken)!important;color:var(--muted)!important}
 .nb{font-size:10.5px;font-weight:700;color:#7a4b00;background:#ffd98a;border-radius:4px;padding:1px 6px}
 .notes{border-top:1px solid var(--line);padding-top:12px;display:flex;flex-direction:column;gap:8px}
 .notes-h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
@@ -222,6 +223,11 @@ main{max-width:1400px;margin:0 auto;padding-block:16px 40px;padding-left:max(16p
 .ghost.key{border-color:var(--amber);color:var(--amber);font-weight:600}
 .codein{font-size:24px!important;letter-spacing:.4em;text-align:center;max-width:200px}
 .cerr{color:var(--bad);font-weight:600;margin:0}
+.toast.err{background:var(--bad);color:#fff;max-width:min(520px,calc(100vw - 32px));text-align:center}
+.liv{font-size:11.5px;font-weight:600;color:var(--muted);display:flex;align-items:center;gap:4px}
+.liv.late{color:var(--bad)}
+.ferr{color:var(--bad);font-weight:600;margin:0}
+.card.task.urg{border:1.5px solid var(--bad);background:color-mix(in srgb,var(--bad) 8%,var(--surface));box-shadow:inset 4px 0 0 var(--bad)}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:8px 16px;border-radius:8px;z-index:30;font-weight:500}
 
 .dropbtns{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
@@ -299,7 +305,9 @@ try{myName=localStorage.getItem("ams-nom")||""}catch(e){}
 const sv=c=>suivi[c.id]||{};
 const isDone=c=>sv(c).fait!==undefined?!!sv(c).fait:c.statut==="termine";
 const openNotes=c=>(sv(c).notes||[]).filter(n=>!n.regle);
-const noteBadge=c=>{const n=openNotes(c).length;return n?`<span class="nb">${n} note${n>1?"s":""}</span>`:""};
+const noteBadge=c=>{const ns=sv(c).notes||[];if(!ns.length)return "";
+  if(role==="com"&&mode!=="atelier"){const n=ns.filter(x=>x.de!=="com"&&!x.regle).length;return n?`<span class="nb">${n} note${n>1?"s":""}</span>`:""}
+  return ns[ns.length-1].de==="com"?`<span class="nb">Réponse</span>`:`<span class="nb nb2">${ns.length} note${ns.length>1?"s":""}</span>`};
 let monday=defaultMonday(), dragId=null, mode=location.hash==="#atelier"?"atelier":"plan", fOuv="tous";
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -314,7 +322,7 @@ const fmt=new Intl.DateTimeFormat("fr-FR",{day:"numeric",month:"short"});
 const fmtLong=new Intl.DateTimeFormat("fr-FR",{day:"numeric",month:"long",year:"numeric"});
 function h(n){return (Math.round(n*10)/10).toString().replace(".",",")+" h"}
 const sumH=l=>l.reduce((a,c)=>a+(+c.heures||0),0);
-function toast(t){const e=document.createElement("div");e.className="toast";e.textContent=t;document.body.appendChild(e);setTimeout(()=>e.remove(),2400)}
+function toast(t,err){document.querySelectorAll(".toast.err").forEach(x=>x.remove());const e=document.createElement("div");e.className="toast"+(err?" err":"");e.setAttribute("role",err?"alert":"status");e.textContent=t;document.body.appendChild(e);setTimeout(()=>e.remove(),err?5000:2400)}
 function notice(t,err){const n=$("#notice");if(!t){n.hidden=true;return}n.hidden=false;n.className="notice"+(err?" err":"");n.textContent=t}
 function items(t){return String(t||"").split(/\n|\s\+\s|;/).map(x=>x.replace(/^[\s\-•*·]+/,"").trim()).filter(Boolean)}
 const blTxt=b=>/^bl/i.test(String(b||""))?String(b):"BL "+(b||"");
@@ -378,6 +386,25 @@ function render(){
 }
 const DAYS_S=["lundi","mardi","mercredi","jeudi","vendredi"];
 function whereTxt(x){const i=[0,1,2,3,4].find(k=>addDays(monday,k)===x.day);return (DAYS_S[i]||"")+(x.slot==="aprem"?" après-midi":" matin")}
+const fmtDay=new Intl.DateTimeFormat("fr-FR",{weekday:"long",day:"numeric",month:"short"});
+function overloadMsg(c,patch){
+  const nc={...c,...patch};const os=ouvs(nc);
+  if(!os.length||!nc.jour||!(+nc.heures>0))return "";
+  const cap=cfg.heuresJour||8;
+  const mine=segsOf(nc);const days=[...new Set(mine.map(g=>g.day))];
+  const all=[...chantiers.filter(k=>k.id!==c.id).flatMap(segsOf),...mine];
+  for(const o of os){
+    const per={};all.filter(g=>ouvs(g.c).some(x=>x.id===o.id)).forEach(g=>{per[g.day]=(per[g.day]||0)+g.h});
+    for(const d of days)if(per[d]>cap+1e-9)return `Impossible : ${o.nom} aurait ${h(per[d])} de travail le ${fmtDay.format(parse(d))} (maximum ${h(cap)} par jour).`;
+  }
+  return "";
+}
+function livTag(c){
+  if(!c.livraison)return "";
+  const sg=segsOf(c);const end=sg.length?sg[sg.length-1].day:"";
+  const late=end&&end>c.livraison;
+  return `<div class="liv${late?" late":""}" title="${late?"Le chantier finit après la date de livraison":"Date de livraison du véhicule"}">Livraison ${esc(fmt.format(parse(c.livraison)))}${late?" · en retard":""}</div>`;
+}
 function card(c,g){
   const os=ouvs(c);
   const st=[];if(os.length)st.push(`--oc:${esc(os[0].couleur)}`);if(g&&g.h>0)st.push(`min-height:${Math.round(g.h*30)}px`);
@@ -401,7 +428,7 @@ function card(c,g){
   }
   return `<button class="${cls}" draggable="${canWrite}" data-id="${esc(c.id)}"${sty}>
     <div class="r1"><span class="bl">${esc(blLbl(c))}</span>${c.urgent?`<span class="urgb">URGENT</span>`:""}${noteBadge(c)}</div>
-    <div class="veh">${esc(c.vehicule||"Véhicule non précisé")}</div>
+    <div class="veh">${esc(c.vehicule||"Véhicule non précisé")}</div>${livTag(c)}
     ${last?`${nxt}<div class="r3 foot">${who}${tgl}</div>`:`<div class="r3">${who}</div>${nxt}`}
   </button>`;
 }
@@ -430,6 +457,7 @@ function openDetail(c){
     ${row("Immat. / VIN",esc(c.immat))}${row("Client",esc(c.client))}
     ${row("Ouvrier(s)",os.map(o=>`<span class="who"><span class="dot" style="background:${esc(o.couleur)}"></span>${esc(o.nom)}</span>`).join(" ")||"À définir")}
     ${row("Temps prévu",+c.heures>0?h(+c.heures):"")}
+    ${row("Livraison du véhicule",c.livraison?esc(fmtDay.format(parse(c.livraison))):"")}
     ${row("Commercial",esc(c.commercial))}
     ${notesBlock(c)}
   </div>`,`<span></span><div style="display:flex;gap:8px">${canSuivi?`<button class="btn ${done?"":"ok"}" type="button" data-toggle-p="${esc(c.id)}">${done?"Repasser à faire":"✓ Marquer terminé"}</button>`:""}<button class="btn" data-close type="button">Fermer</button></div>`);
@@ -469,7 +497,7 @@ function miniCard(c){
   const os=ouvs(c);
   return `<button class="card${isTask(c)?" task":""}${c.urgent?" urg":""}" draggable="${canWrite}" data-id="${esc(c.id)}">
     <div class="r1"><span class="bl">${esc(blLbl(c))}</span>${c.urgent?`<span class="urgb">URGENT</span>`:""}${noteBadge(c)}</div>
-    <div class="veh">${esc(c.vehicule||"Véhicule non précisé")}</div>
+    <div class="veh">${esc(c.vehicule||"Véhicule non précisé")}</div>${livTag(c)}
     <div class="r3">${os.length?`<span class="who">${os.map(o=>`<span class="dot" style="background:${esc(o.couleur)}"></span>${esc(o.nom)}`).join(" ")}</span>`:`<span class="who none">Ouvrier à définir</span>`}${incomplete(c)?`<span class="todo">À compléter</span>`:""}</div>
   </button>`;
 }
@@ -567,13 +595,17 @@ function openTask(c){
       <div class="f"><label for="t-lib">Tâche *</label><input id="t-lib" required value="${esc(c.vehicule)}" placeholder="ex. Rangement de l'atelier" list="t-sugg" data-focus><datalist id="t-sugg"><option value="Rangement de l'atelier"><option value="Nettoyage de l'atelier"><option value="Inventaire du stock"><option value="Entretien des machines"></datalist></div>
       <div class="f"><label for="t-det">Détails</label><textarea id="t-det" rows="3" placeholder="Facultatif">${esc(items(c.travaux).map(x=>"• "+x).join("\n"))}</textarea></div>
       <div class="hbox"><label for="t-h">Temps prévu *</label><div class="hrow"><input id="t-h" type="number" min="0.5" step="0.5" required placeholder="0" value="${+c.heures>0?esc(c.heures):""}"><span class="unit">h</span></div></div>
+      <label class="urg-opt" for="t-urg"><input type="checkbox" id="t-urg"${c.urgent?" checked":""}><span class="ic">!</span>Tâche urgente</label>
       <div class="f"><label>Ouvrier(s)</label><div class="checks">${ouvChecks}</div></div>
+      ${c.id?notesBlock(c):""}
+      <p class="ferr" id="t-err" hidden></p>
       <div id="delZone"></div>
     </form>`,
     `${isNew?"<span></span>":`<button class="btn danger" id="del" type="button">Supprimer</button>`}<div style="display:flex;gap:8px"><button class="btn" data-close type="button">Annuler</button><button class="btn primary" id="tsave" type="button">${isNew?"Créer la tâche":"Mettre à jour"}</button></div>`);
   $("#tsave").onclick=async()=>{
     if(!$("#tfrm").reportValidity())return;
-    const data={type:"tache",bl:"",vehicule:$("#t-lib").value.trim(),travaux:items($("#t-det").value).join("\n"),heures:+$("#t-h").value,ouvriers:[...document.querySelectorAll('input[name="t-o"]:checked')].map(x=>x.value),ouvrier:"",urgent:false,client:"",immat:"",jour:c.jour||"",creneau:c.creneau||"",semaine:c.semaine||monday,statut:c.statut||"afaire",commercial:c.commercial||lastCommercial,maj:new Date().toISOString()};
+    const data={type:"tache",bl:"",vehicule:$("#t-lib").value.trim(),travaux:items($("#t-det").value).join("\n"),heures:+$("#t-h").value,ouvriers:[...document.querySelectorAll('input[name="t-o"]:checked')].map(x=>x.value),ouvrier:"",urgent:$("#t-urg").checked,client:"",immat:"",jour:c.jour||"",creneau:c.creneau||"",semaine:c.semaine||monday,statut:c.statut||"afaire",commercial:c.commercial||lastCommercial,maj:new Date().toISOString()};
+    if(!isNew){const m=overloadMsg(c,data);if(m){$("#t-err").textContent=m;$("#t-err").hidden=false;toast(m,true);return}}
     $("#tsave").disabled=true;
     try{const col=db.collection("chantiers");if(isNew)await col.add(data);else await col.doc(c.id).set(data);closePanel();toast(isNew?"Tâche créée : glissez-la sur le planning":"Tâche mise à jour")}
     catch(e){$("#tsave").disabled=false;writeError(e)}
@@ -594,6 +626,7 @@ function openForm(c){
   const stOpts=Object.entries(STATUTS).map(([k,v])=>`<option value="${k}"${c.statut===k?" selected":""}>${v}</option>`).join("");
   openPanel(isNew?"Nouveau BL":"BL "+c.bl,`
     <form id="frm" class="body">
+      ${c.id&&(sv(c).notes||[]).length?notesBlock(c):""}
       ${c.fichier?`<p class="from-pdf">Lu depuis ${esc(c.fichier)}. Vérifiez les infos, indiquez le temps et les ouvriers, puis glissez la carte sur un jour du planning.</p>`:""}
       <div class="row2">
         <div class="f" style="grid-column:1/-1"><label for="f-bl">N° BL *</label><input id="f-bl" required value="${esc(c.bl)}" placeholder="ex. 24-1187"></div>
@@ -611,16 +644,19 @@ function openForm(c){
       <label class="urg-opt" for="f-urg"><input type="checkbox" id="f-urg"${c.urgent?" checked":""}><span class="ic">!</span>BL urgent</label>
       <div class="f"><label>Ouvrier(s)</label><div class="checks">${ouvChecks}</div></div>
       <div class="row2">
+        <div class="f"><label for="f-liv">Livraison du véhicule</label><input id="f-liv" type="date" value="${esc(c.livraison||"")}"></div>
         <div class="f"><label for="f-com">Commercial</label><input id="f-com" value="${esc(c.commercial)}" placeholder="Votre prénom"></div>
       </div>
-      ${c.id?notesBlock(c):""}
+      ${c.id&&!(sv(c).notes||[]).length?notesBlock(c):""}
+      <p class="ferr" id="f-err" hidden></p>
       <div id="delZone"></div>
     </form>`,
     `${isNew?"<span></span>":`<button class="btn danger" id="del" type="button">Supprimer</button>`}<div style="display:flex;gap:8px"><button class="btn" data-close type="button">Annuler</button><button class="btn primary" id="save" type="button"${canWrite?"":" disabled"}>${isNew?"Enregistrer":"Mettre à jour"}</button></div>`);
   $("#save").onclick=async()=>{
     const f=$("#frm");if(!f.reportValidity())return;
     const sem=wk;
-    const data={bl:$("#f-bl").value.trim(),client:$("#f-client").value.trim(),vehicule:$("#f-veh").value.trim(),immat:$("#f-immat").value.trim().toUpperCase(),travaux:items($("#f-trav").value).join("\n"),heures:+$("#f-h").value,statut:c.statut||"afaire",urgent:$("#f-urg").checked,ouvriers:[...document.querySelectorAll('input[name="f-o"]:checked')].map(x=>x.value),ouvrier:"",fichier:c.fichier||"",jour:c.jour||"",creneau:c.creneau||"",semaine:sem,commercial:$("#f-com").value.trim(),maj:new Date().toISOString()};
+    const data={bl:$("#f-bl").value.trim(),client:$("#f-client").value.trim(),vehicule:$("#f-veh").value.trim(),immat:$("#f-immat").value.trim().toUpperCase(),travaux:items($("#f-trav").value).join("\n"),heures:+$("#f-h").value,statut:c.statut||"afaire",urgent:$("#f-urg").checked,ouvriers:[...document.querySelectorAll('input[name="f-o"]:checked')].map(x=>x.value),ouvrier:"",fichier:c.fichier||"",jour:c.jour||"",creneau:c.creneau||"",semaine:sem,commercial:$("#f-com").value.trim(),livraison:$("#f-liv").value||"",maj:new Date().toISOString()};
+    if(!isNew){const m=overloadMsg(c,data);if(m){$("#f-err").textContent=m;$("#f-err").hidden=false;toast(m,true);return}}
     try{lastCommercial=data.commercial;localStorage.setItem("ams-commercial",data.commercial)}catch(e){}
     $("#save").disabled=true;
     try{
@@ -677,7 +713,7 @@ function writeError(e){
 document.addEventListener("click",e=>{
   if(e.target.closest("[data-close]")){closePanel();return}
   const tp=e.target.closest("[data-toggle-p]");if(tp){toggleStatut(tp.dataset.toggleP);return}
-  const an=e.target.closest("[data-addnote]");if(an){const box=an.closest(".notes");const c=chantiers.find(k=>k.id===box.dataset.nid);    const txt=$("#n-txt").value;if(!txt.trim()){$("#n-txt").focus();return}an.disabled=true;addNote(c,txt).then(ok=>{an.disabled=false;if(ok){toast("Note envoyée aux commerciaux");reopen(chantiers.find(k=>k.id===c.id)||c)}});return}
+  const an=e.target.closest("[data-addnote]");if(an){const box=an.closest(".notes");const c=chantiers.find(k=>k.id===box.dataset.nid);    const txt=$("#n-txt").value;if(!txt.trim()){$("#n-txt").focus();return}an.disabled=true;addNote(c,txt).then(ok=>{an.disabled=false;if(ok){toast(noteSide()==="com"?"Réponse envoyée à l'atelier":"Note envoyée aux commerciaux");reopen(chantiers.find(k=>k.id===c.id)||c)}});return}
   const rg=e.target.closest("[data-regle]");if(rg){const box=rg.closest(".notes");const c=chantiers.find(k=>k.id===box.dataset.nid);toggleRegle(c,rg.dataset.regle).then(ok=>{if(ok)reopen(c)});return}
   const t=e.target.closest("[data-toggle]");if(t){e.preventDefault();toggleStatut(t.closest(".card")?.dataset.id);return}
   const fo=e.target.closest("[data-fo]");if(fo){fOuv=fo.dataset.fo;render();return}
@@ -702,9 +738,11 @@ async function writeSuivi(c,patch){
   try{await db.collection("suivi").doc(c.id).set(next);return true}
   catch(e){suivi[c.id]=prev;render();if((e?.code==="invalid_argument"||e?.code==="permission-denied")){canSuivi=false;if(role!=="com")role="lecture";notice("Enregistrement refusé par la base de données.",true);render()}else notice("L'enregistrement a échoué. Vérifiez la connexion et réessayez.",true);return false}
 }
+const noteSide=()=>role==="com"&&mode!=="atelier"?"com":"atelier";
 async function addNote(c,txt){
   txt=txt.trim();if(!txt)return false;
-  const n={id:Date.now().toString(36),txt,par:"Atelier",de:"atelier",le:new Date().toISOString(),regle:false};
+  const sd=noteSide();
+  const n={id:Date.now().toString(36),txt,par:sd==="com"?"Commercial":"Atelier",de:sd,le:new Date().toISOString(),regle:false};
   return writeSuivi(c,{notes:[...(sv(c).notes||[]),n]});
 }
 async function toggleRegle(c,nid){
@@ -712,10 +750,10 @@ async function toggleRegle(c,nid){
 }
 const fmtNote=new Intl.DateTimeFormat("fr-FR",{weekday:"short",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"});
 function notesBlock(c){
-  const ns=sv(c).notes||[];const side=role==="com"&&mode!=="atelier"?"com":"atelier";
-  return `<div class="notes" data-nid="${esc(c.id)}"><div class="notes-h">Notes de l'atelier${ns.length?` <span>${ns.length}</span>`:""}</div>
-    ${ns.length?ns.map(n=>`<div class="note${n.regle?" ok":""}${n.de==="com"?" com":""}"><div class="nm"><b>${esc(n.par)}</b> · ${esc(fmtNote.format(new Date(n.le)))}${n.regle?` · <span class="ok-l">Réglé</span>`:""}</div><div class="nt">${esc(n.txt)}</div>${canSuivi&&side==="com"?`<button type="button" class="lnk" data-regle="${esc(n.id)}">${n.regle?"Rouvrir":"Marquer réglé"}</button>`:""}</div>`).join(""):`<p class="hint">${side==="com"?"Aucune note de l'atelier sur ce BL.":"Aucune note. Signalez ici un problème ou un élément manquant."}</p>`}
-    ${canSuivi&&side==="atelier"?`<div class="nadd"><textarea id="n-txt" rows="2" placeholder="Pour l'équipe commerciale. Ex. : il manque la CE, problème de serrure…"></textarea><button type="button" class="btn" data-addnote>Envoyer aux commerciaux</button></div>`:""}
+  const ns=sv(c).notes||[];const side=noteSide();
+  return `<div class="notes" data-nid="${esc(c.id)}"><div class="notes-h">Échanges atelier ↔ commerciaux${ns.length?` <span>${ns.length}</span>`:""}</div>
+    ${ns.length?ns.map(n=>`<div class="note${n.regle?" ok":""}${n.de==="com"?" com":""}"><div class="nm"><b>${esc(n.par)}</b> · ${esc(fmtNote.format(new Date(n.le)))}${n.regle?` · <span class="ok-l">Réglé</span>`:""}</div><div class="nt">${esc(n.txt)}</div>${canSuivi&&side==="com"&&n.de!=="com"?`<button type="button" class="lnk" data-regle="${esc(n.id)}">${n.regle?"Rouvrir":"Marquer réglé"}</button>`:""}</div>`).join(""):`<p class="hint">${side==="com"?"Aucune note de l'atelier sur ce BL.":"Aucune note. Signalez ici un problème ou un élément manquant."}</p>`}
+    ${canSuivi?`<div class="nadd"><textarea id="n-txt" rows="2" placeholder="${side==="com"?"Répondre à l'atelier…":"Pour l'équipe commerciale. Ex. : il manque la CE, problème de serrure…"}"></textarea><button type="button" class="btn" data-addnote>${side==="com"?"Répondre à l'atelier":"Envoyer aux commerciaux"}</button></div>`:""}
   </div>`;
 }
 let reopenFn=null;
@@ -740,6 +778,7 @@ document.addEventListener("drop",async e=>{
   const jour=z.dataset.drop==="backlog"?"":z.dataset.d;
   const creneau=z.dataset.drop==="backlog"?"":z.dataset.s;
   if(jour===(c.jour||"")&&(!jour||creneau===slotOf(c)))return;
+  if(jour){const m=overloadMsg(c,{jour,creneau});if(m){toast(m,true);return}}
   c.jour=jour;c.creneau=creneau;render();
   try{await db.collection("chantiers").doc(c.id).update({jour,creneau,maj:new Date().toISOString()})}catch(err){writeError(err)}
 });
