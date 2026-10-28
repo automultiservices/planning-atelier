@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Le planning n'a pas de comptes : toute personne qui a le lien peut lire et écrire
+    // dans ces trois collections, et rien d'autre.
+    match /chantiers/{id} { allow read, write: if true; }
+    match /suivi/{id}     { allow read, write: if true; }
+    match /config/{id}    { allow read, write: if true; }
+  }
+}
