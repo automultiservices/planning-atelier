@@ -6,6 +6,7 @@ Tout est synchronisé en direct entre tous les appareils.
 
 - Accès commercial : bouton « Accès commercial », code **4567**.
 - Vue atelier : par défaut, pour tout le monde.
+- Bouton « Exporter en PDF » (accès commercial) : planning de la semaine affichée en A4 paysage, plus la liste des BL à planifier en page 2. Pratique pour partager le planning par mail.
 
 ## En ligne
 - Planning : https://automultiservices.github.io/planning-atelier/

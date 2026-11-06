@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="config.js"></script>
@@ -268,6 +269,7 @@ main{max-width:1400px;margin:0 auto;padding-block:16px 40px;padding-left:max(16p
     <div class="abar" id="abar" role="group" aria-label="Filtrer par ouvrier"></div>
     <div class="actions">
       <button class="btn" id="btnMode" hidden>Vue atelier</button>
+      <button class="btn" id="btnPdf">Exporter en PDF</button>
       <button class="btn" id="btnTeam">Ouvriers</button>
       <button class="btn" id="btnTask">+ Tâche atelier</button>
     </div>
@@ -404,6 +406,140 @@ function livTag(c){
   const sg=segsOf(c);const end=sg.length?sg[sg.length-1].day:"";
   const late=end&&end>c.livraison;
   return `<div class="liv${late?" late":""}" title="${late?"Le chantier finit après la date de livraison":"Date de livraison du véhicule"}">Livraison ${esc(fmt.format(parse(c.livraison)))}${late?" · en retard":""}</div>`;
+}
+/* ---------- export PDF ---------- */
+function rgbOf(hex){const m=/^#?([0-9a-f]{6})$/i.exec(hex||"");if(!m)return [130,140,158];const n=parseInt(m[1],16);return [n>>16&255,n>>8&255,n&255]}
+const tintC=(c,t)=>c.map(v=>Math.round(v+(255-v)*t));
+const pdfTxt=t=>String(t||"").replace(/[’‘]/g,"'").replace(/[“”«»]/g,'"').replace(/[–—]/g,"-").replace(/…/g,"...").replace(/[^\x20-\xFF\n]/g,"");
+function exportPdf(){
+  if(!window.jspdf){toast("Le module PDF n'a pas pu se charger. Rechargez la page.",true);return}
+  const {jsPDF}=window.jspdf;
+  const doc=new jsPDF({orientation:"landscape",unit:"mm",format:"a4"});
+  const PW=297,PH=210,M=8,NAVY=[13,37,71],AMBER=[242,165,22],MUTED=[100,112,135],LINE=[205,213,227];
+  const SEGS=allSegs().sort((a,b)=>(!!b.c.urgent-!!a.c.urgent));
+  const fri=addDays(monday,4);
+  const fL=new Intl.DateTimeFormat("fr-FR",{day:"numeric",month:"long"});
+  // bandeau
+  doc.setFillColor(...NAVY);doc.rect(0,0,PW,17,"F");
+  doc.setFont("helvetica","bold");doc.setFontSize(18);doc.setTextColor(255);doc.text("AMS",M,11.5);
+  doc.setFontSize(12);doc.setTextColor(...AMBER);doc.text("PLANNING ATELIER",M+19,11.5);
+  doc.setTextColor(255);doc.setFontSize(12);doc.text(pdfTxt(`Semaine ${weekNum(monday)}  -  du ${fL.format(parse(monday))} au ${fL.format(parse(fri))} ${parse(fri).getFullYear()}`),PW-M,11.5,{align:"right"});
+  // grille
+  const LBL=11,top=21,dayH=12,bottom=186;
+  const colW=(PW-2*M-LBL)/5,rowH=(bottom-top-dayH)/2;
+  const capDay=cfg.ouvriers.length*(cfg.heuresJour||8);
+  DAYS.forEach((d,i)=>{
+    const x=M+LBL+i*colW,day=addDays(monday,i);
+    const cs=SEGS.filter(g=>g.day===day);const hh=segCharge(cs);
+    doc.setFillColor(227,233,243);doc.rect(x,top,colW,dayH,"F");
+    doc.setFont("helvetica","bold");doc.setFontSize(10.5);doc.setTextColor(...NAVY);doc.text(d.toUpperCase(),x+2.5,top+5.2);
+    doc.setFontSize(10.5);doc.text(pdfTxt(fmt.format(parse(day))),x+colW-2.5,top+5.2,{align:"right"});
+    // jauge
+    const pct=capDay?Math.min(1,hh/capDay):0;const bw=colW-5;
+    doc.setFillColor(255,255,255);doc.roundedRect(x+2.5,top+8,bw,1.6,.8,.8,"F");
+    if(pct>0){doc.setFillColor(...(hh>capDay?[210,58,43]:hh>=capDay*.8?[217,119,6]:[31,138,76]));doc.roundedRect(x+2.5,top+8,Math.max(1.6,bw*pct),1.6,.8,.8,"F")}
+  });
+  [["matin","MATIN",[243,247,253]],["aprem","APRÈS-MIDI",[251,247,238]]].forEach(([k,lbl,bg],r)=>{
+    const y=top+dayH+r*rowH;
+    doc.setFillColor(...tintC(bg,-0.0));doc.setFillColor(r?236:225,r?228:234,r?212:246);doc.rect(M,y,LBL,rowH,"F");
+    doc.setFont("helvetica","bold");doc.setFontSize(8.5);doc.setTextColor(...NAVY);
+    doc.text(lbl,M+LBL/2+1.4,y+rowH/2+doc.getTextWidth(lbl)/2,{angle:90});
+    for(let i=0;i<5;i++){
+      const x=M+LBL+i*colW;doc.setFillColor(...bg);doc.rect(x,y,colW,rowH,"F");
+      pdfCell(doc,SEGS.filter(g=>g.day===addDays(monday,i)&&g.slot===k),x+1.3,y+1.3,colW-2.6,rowH-2.6);
+    }
+  });
+  doc.setDrawColor(...LINE);doc.setLineWidth(.3);
+  for(let i=0;i<=5;i++){const x=M+LBL+i*colW;doc.line(x,top,x,bottom)}
+  doc.line(M,top+dayH,PW-M,top+dayH);doc.line(M,top+dayH+rowH,PW-M,top+dayH+rowH);
+  doc.setLineWidth(.5);doc.rect(M,top,PW-2*M,bottom-top);
+  // légende
+  let lx=M,ly=193;
+  doc.setFont("helvetica","bold");doc.setFontSize(8);doc.setTextColor(...MUTED);doc.text("LÉGENDE",lx,ly);lx+=16;
+  doc.setFont("helvetica","normal");doc.setTextColor(20,30,50);
+  const leg=[...cfg.ouvriers.map(o=>[o.nom,rgbOf(o.couleur)]),["Tâche atelier",[123,92,214]],["Urgent",[210,58,43]],["Terminé",[31,138,76]],["Non attribué",[150,158,172]]];
+  leg.forEach(([n,c])=>{doc.setFillColor(...c);doc.roundedRect(lx,ly-2.8,3.6,3.6,.8,.8,"F");doc.text(pdfTxt(n),lx+5,ly);lx+=doc.getTextWidth(pdfTxt(n))+10});
+  const pend=chantiers.filter(c=>!c.jour);
+  doc.setTextColor(...MUTED);doc.setFontSize(7.5);
+  doc.text(pdfTxt(`Exporté le ${new Intl.DateTimeFormat("fr-FR",{dateStyle:"long",timeStyle:"short"}).format(new Date())}${pend.length?`  ·  ${pend.length} BL à planifier en page 2`:""}`),PW-M,ly,{align:"right"});
+  if(pend.length)pdfBacklog(doc,pend);
+  doc.save(`Planning atelier AMS - S${weekNum(monday)} (${monday}).pdf`);
+  toast("PDF téléchargé");
+}
+function pdfCell(doc,list,x,y,w,hA){
+  if(!list.length){doc.setFont("helvetica","italic");doc.setFontSize(8);doc.setTextColor(175,182,196);doc.text("Libre",x+w/2,y+hA/2,{align:"center"});return}
+  const GAP=1.5,PAD=1.7;
+  const build=(mt,fs)=>list.map(g=>{
+    const c=g.c,os=ouvs(c);const lh=fs*.42;
+    doc.setFont("helvetica","bold");doc.setFontSize(fs+.6);
+    const veh=doc.splitTextToSize(pdfTxt(c.vehicule||"Véhicule non précisé"),w-2*PAD-2).slice(0,2);
+    doc.setFont("helvetica","normal");doc.setFontSize(fs-.6);
+    let tr=[];
+    if(g.part===1&&mt>0){for(const t of items(c.travaux))tr.push(...doc.splitTextToSize("- "+pdfTxt(t),w-2*PAD-2));if(tr.length>mt){tr=tr.slice(0,mt);tr[mt-1]=tr[mt-1].replace(/.{0,3}$/,"...")}}
+    const extra=(c.livraison&&g.part===1?1:0)+(g.parts>1?0:0);
+    const lines=1+veh.length+1+extra+tr.length;
+    return {g,c,os,veh,tr,lh,fs,h:PAD*2+lines*lh+(tr.length?.5:0)};
+  });
+  let blocks=null;
+  for(const [mt,fs] of [[6,8],[3,8],[2,7.4],[0,7.4],[0,6.8]]){const b=build(mt,fs);if(b.reduce((a,k)=>a+k.h+GAP,0)-GAP<=hA){blocks=b;break}}
+  let more=0;
+  if(!blocks){const all=build(0,6.8);let acc=0;blocks=[];for(const b of all){if(acc+b.h+GAP>hA-4)break;acc+=b.h+GAP;blocks.push(b)}more=all.length-blocks.length}
+  let cy=y;
+  for(const b of blocks){
+    const {g,c,os,lh,fs}=b,done=isDone(c),urg=c.urgent&&!done,task=isTask(c);
+    const col=done?[31,138,76]:task?[123,92,214]:os.length?rgbOf(os[0].couleur):[150,158,172];
+    doc.setFillColor(...(urg?[253,232,229]:tintC(col,.85)));doc.roundedRect(x,cy,w,b.h,1.3,1.3,"F");
+    if(urg){doc.setDrawColor(210,58,43);doc.setLineWidth(.6);doc.roundedRect(x,cy,w,b.h,1.3,1.3,"S")}
+    const bw=1.6;
+    if(!done&&!task&&os.length>1){const seg=b.h/os.length;os.forEach((o,k)=>{doc.setFillColor(...rgbOf(o.couleur));doc.rect(x,cy+k*seg,bw,seg,"F")})}
+    else{doc.setFillColor(...(urg?[210,58,43]:col));doc.rect(x,cy,bw,b.h,"F")}
+    const tx=x+bw+PAD,rx=x+w-PAD;let ly=cy+PAD+lh*.78;
+    // ligne 1 : BL + tags + heures
+    doc.setFont("helvetica","bold");doc.setFontSize(fs-.4);doc.setTextColor(...(task?[95,70,180]:[13,37,71]));
+    const lbl=pdfTxt((g.part>1?"Suite - ":"")+blLbl(c));doc.text(lbl,tx,ly);
+    let tagX=tx+doc.getTextWidth(lbl)+1.4;
+    const tag=(t,bg)=>{doc.setFontSize(fs-2.2);const tw=doc.getTextWidth(t)+2;doc.setFillColor(...bg);doc.roundedRect(tagX,ly-lh*.72,tw,lh*.95,.7,.7,"F");doc.setTextColor(255);doc.text(t,tagX+1,ly-.15);tagX+=tw+1;doc.setFontSize(fs-.4)};
+    if(urg&&g.part===1)tag("URGENT",[210,58,43]);
+    if(done)tag("TERMINÉ",[31,138,76]);
+    doc.setFont("helvetica","bold");doc.setTextColor(13,37,71);
+    doc.text(+c.heures>0?pdfTxt(h(g.h)):"? h",rx,ly,{align:"right"});
+    ly+=lh;
+    doc.setFontSize(fs+.6);doc.setTextColor(20,30,50);b.veh.forEach(v=>{doc.text(v,tx,ly);ly+=lh});
+    doc.setFontSize(fs-.4);
+    if(os.length){doc.setTextColor(...(done?[31,110,60]:task?[95,70,180]:col.map(v=>Math.round(v*.72))));doc.text(pdfTxt(os.map(o=>o.nom).join(" + ")),tx,ly)}
+    else{doc.setTextColor(190,50,40);doc.text("Ouvrier à définir",tx,ly)}
+    if(g.parts>1){doc.setFont("helvetica","normal");doc.setTextColor(...MUTEDC);doc.text(`partie ${g.part}/${g.parts}${g.over?" - suite S+1":""}`,rx,ly,{align:"right"})}
+    ly+=lh;
+    if(c.livraison&&g.part===1){const sg=segsOf(c);const late=sg.length&&sg[sg.length-1].day>c.livraison;doc.setFont("helvetica",late?"bold":"normal");doc.setTextColor(...(late?[190,50,40]:MUTEDC));doc.text(pdfTxt(`Livraison ${fmt.format(parse(c.livraison))}${late?" - en retard":""}`),tx,ly);ly+=lh}
+    if(b.tr.length){ly+=.5;doc.setFont("helvetica","normal");doc.setFontSize(fs-.6);doc.setTextColor(60,70,90);b.tr.forEach(t=>{doc.text(t,tx,ly);ly+=lh})}
+    cy+=b.h+GAP;
+  }
+  if(more){doc.setFont("helvetica","bold");doc.setFontSize(7.5);doc.setTextColor(190,50,40);doc.text(`+ ${more} autre${more>1?"s":""} (voir planning en ligne)`,x+1,cy+2.8)}
+}
+const MUTEDC=[100,112,135];
+function pdfBacklog(doc,pend){
+  doc.addPage("a4","landscape");
+  const M=8,PW=297;
+  doc.setFillColor(13,37,71);doc.rect(0,0,PW,14,"F");
+  doc.setFont("helvetica","bold");doc.setFontSize(13);doc.setTextColor(255);doc.text(pdfTxt(`À planifier - semaine ${weekNum(monday)}`),M,9.5);
+  doc.setFontSize(9);doc.setFont("helvetica","normal");doc.text(`${pend.length} BL / tâche${pend.length>1?"s":""} pas encore placé${pend.length>1?"s":""} sur le planning`,PW-M,9.5,{align:"right"});
+  const cols=[["N° BL",34],["Véhicule",62],["Client",58],["Temps",16],["Ouvrier(s)",34],["Livraison",24],["Travaux",0]];
+  const tw=PW-2*M;cols[6][1]=tw-cols.slice(0,6).reduce((a,c)=>a+c[1],0);
+  let y=20;
+  const head=()=>{doc.setFillColor(227,233,243);doc.rect(M,y,tw,7,"F");doc.setFont("helvetica","bold");doc.setFontSize(8.5);doc.setTextColor(13,37,71);let x=M;cols.forEach(([n,w])=>{doc.text(n,x+2,y+4.8);x+=w});y+=7};
+  head();
+  pend.sort((a,b)=>(!!b.urgent-!!a.urgent)||String(a.livraison||"9").localeCompare(String(b.livraison||"9")));
+  for(const c of pend){
+    doc.setFont("helvetica","normal");doc.setFontSize(8.5);
+    const vals=[pdfTxt(blLbl(c))+(c.urgent?" (URGENT)":""),pdfTxt(c.vehicule),pdfTxt(c.client),+c.heures>0?pdfTxt(h(+c.heures)):"?",pdfTxt(ouvs(c).map(o=>o.nom).join(" + ")||"À définir"),c.livraison?pdfTxt(fmt.format(parse(c.livraison))):"",items(c.travaux).map(pdfTxt).join(" · ")];
+    const wrapped=vals.map((v,i)=>doc.splitTextToSize(v||"",cols[i][1]-4).slice(0,4));
+    const rh=Math.max(...wrapped.map(w=>w.length))*3.7+3;
+    if(y+rh>200){doc.addPage("a4","landscape");y=12;head()}
+    if(c.urgent){doc.setFillColor(253,232,229);doc.rect(M,y,tw,rh,"F")}
+    let x=M;wrapped.forEach((lines,i)=>{doc.setFont("helvetica",i===0?"bold":"normal");doc.setTextColor(...(i===0&&c.urgent?[190,50,40]:[20,30,50]));lines.forEach((l,k)=>doc.text(l,x+2,y+4.3+k*3.7));x+=cols[i][1]});
+    doc.setDrawColor(215,221,232);doc.setLineWidth(.2);doc.line(M,y+rh,M+tw,y+rh);
+    y+=rh;
+  }
 }
 function card(c,g){
   const os=ouvs(c);
@@ -762,6 +898,7 @@ $("#btnAdd").onclick=e=>{e.preventDefault();e.stopPropagation();openForm(null)};
 $("#btnTask").onclick=()=>openTask(null);
 $("#btnCom").onclick=()=>role==="com"?lockCom():openCode();
 $("#btnTeam").onclick=openTeam;
+$("#btnPdf").onclick=()=>{try{exportPdf()}catch(e){console.error(e);toast("Le PDF n'a pas pu être créé. Rechargez la page et réessayez.",true)}};
 $("#btnMode").onclick=()=>{mode=mode==="atelier"?"plan":"atelier";try{history.replaceState(null,"",mode==="atelier"?"#atelier":location.pathname+location.search)}catch(e){}applyMode()};
 window.addEventListener("hashchange",()=>{mode=location.hash==="#atelier"?"atelier":"plan";applyMode()});
 $("#prev").onclick=()=>{monday=addDays(monday,-7);subscribeWeek()};
